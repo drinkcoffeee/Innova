@@ -1,4 +1,4 @@
-###Estructura de esta repo
+Estructura de esta repo
 
 ```text
 ├───audios    #audios de cony subido en formato m4q
