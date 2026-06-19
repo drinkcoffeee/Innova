@@ -12,6 +12,10 @@ const int pines[NUM_BOTONES] = {
   14, 32, 21,   // botón 3, 4, 5     amarrollo,blanco, caca
   27, 33, 19,   // botón 6, 7, 8    gris ,azul,  cafe
   26, 25, 18    // botón 9, 10, 11   morado,verde, negro 
+
+  derecha gnd 
+  medio vcc
+  abajo pin
 };
 
 // Crear un objeto OneButton por cada botón
