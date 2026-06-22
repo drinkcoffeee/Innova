@@ -1,59 +1,52 @@
-#include <FastLED.h>
 #include "DFRobotDFPlayerMini.h"
 #include <HardwareSerial.h>
 #include <OneButton.h>
+#include <Adafruit_NeoPixel.h>
 
-// ── LEDs ────────────────────────────────────────
-#define NUM_ANILLOS 9
+// ── LEDs en cascada ──────────────────────────────
+#define PIN_LED        4
+#define NUM_ANILLOS    9
 #define LEDS_POR_ANILLO 3
+#define NUM_LEDS_TOTAL 27  // 9 x 3
 
-CRGB leds[NUM_ANILLOS][LEDS_POR_ANILLO];
+Adafruit_NeoPixel tira(NUM_LEDS_TOTAL, PIN_LED, NEO_GRB + NEO_KHZ800);
 
-CRGB colores[NUM_ANILLOS] = {
-  CRGB::Red,    // cuadrado 1
-  CRGB::Blue,   // cuadrado 2
-  CRGB::Green,  // cuadrado 3
-  CRGB::Yellow, // cuadrado 4
-  CRGB::Purple, // cuadrado 5
-  CRGB::Orange, // cuadrado 6
-  CRGB::Cyan,   // cuadrado 7
-  CRGB::Gold,   // cuadrado 8
-  CRGB::White   // cuadrado 9
-};
+// Colores de cada cuadrado
+uint32_t colores[NUM_ANILLOS];
 
 // ── DFPlayer ────────────────────────────────────
 HardwareSerial serial_mp3(2);
 DFRobotDFPlayerMini reproductor;
 
 // ── Botones ──────────────────────────────────────
-// 1 botón control + 9 cuadrados = 10 total
-#define NUM_BOTONES 10
+#define NUM_BOTONES 11
 
-const int pinesBotones[NUM_BOTONES] = {
-  13,            // índice 0 → inicio/pausa/reinicio
-  14, 32, 21,    // índice 1,2,3 → cuadrados 1,2,3
-  27, 33, 26,    // índice 4,5,6 → cuadrados 4,5,6
-  25, 34, 35     // índice 7,8,9 → cuadrados 7,8,9
+const int pines[NUM_BOTONES] = {
+  13, 22,       // botón 1 (iniciar), botón 2 (pausa)
+  14, 32, 21,   // cuadrados 1, 2, 3
+  27, 33, 19,   // cuadrados 4, 5, 6
+  26, 25, 18    // cuadrados 7, 8, 9
 };
 
 OneButton botones[NUM_BOTONES] = {
-  OneButton(pinesBotones[0], true),
-  OneButton(pinesBotones[1], true),
-  OneButton(pinesBotones[2], true),
-  OneButton(pinesBotones[3], true),
-  OneButton(pinesBotones[4], true),
-  OneButton(pinesBotones[5], true),
-  OneButton(pinesBotones[6], true),
-  OneButton(pinesBotones[7], true),
-  OneButton(pinesBotones[8], true, false),  // GPIO34 sin pull-up
-  OneButton(pinesBotones[9], true, false)   // GPIO35 sin pull-up
+  OneButton(pines[0],  true),
+  OneButton(pines[1],  true),
+  OneButton(pines[2],  true),
+  OneButton(pines[3],  true),
+  OneButton(pines[4],  true),
+  OneButton(pines[5],  true),
+  OneButton(pines[6],  true),
+  OneButton(pines[7],  true),
+  OneButton(pines[8],  true),
+  OneButton(pines[9],  true),
+  OneButton(pines[10], true)
 };
 
 // ── Secuencia del cuento ─────────────────────────
 struct Paso {
   int audios[4];
   int numAudios;
-  int cuadrados[2];
+  int cuadrados[2];  // índice 0 = cuadrado 1
   int numCuadrados;
   int correcto;
 };
@@ -66,7 +59,7 @@ Paso secuencia[NUM_PASOS] = {
   { {7,8,9,0},    3, {5,3}, 2, 5 },  // paso 2:  cuadrados 6,4 — correcto 6
   { {10,11,12,0}, 3, {7,1}, 2, 7 },  // paso 3:  cuadrados 8,2 — correcto 8
   { {13,14,15,0}, 3, {5,3}, 2, 5 },  // paso 4:  cuadrados 6,4 — correcto 6
-  { {16,17,18,0}, 3, {6,0}, 2, 6 },  // paso 5:  cuadrados 7,1 — correcto 7
+  { {16,17,18,0}, 3, {8,0}, 2, 8 },  // paso 5:  cuadrados 9,1 — correcto 9
   { {19,20,21,0}, 3, {7,1}, 2, 1 },  // paso 6:  cuadrados 8,2 — correcto 2
   { {22,23,24,0}, 3, {0,1}, 2, 1 },  // paso 7:  cuadrados 1,2 — correcto 2
   { {25,26,27,0}, 3, {3,5}, 2, 3 },  // paso 8:  cuadrados 4,6 — correcto 4
@@ -78,26 +71,46 @@ Paso secuencia[NUM_PASOS] = {
 int  pasoActual      = 0;
 int  audioActual     = 0;
 bool reproduciendo   = false;
-bool pausado         = false;
 bool esperandoBoton  = false;
 bool cuentoIniciado  = false;
 
 // ── Funciones LEDs ───────────────────────────────
-void encenderAnillo(int anillo, CRGB color) {
-  for (int i = 0; i < LEDS_POR_ANILLO; i++) {
-    leds[anillo][i] = color;
+void encenderAnillo(int anillo, uint32_t color) {
+  int inicio = anillo * LEDS_POR_ANILLO;
+  for (int i = inicio; i < inicio + LEDS_POR_ANILLO; i++) {
+    tira.setPixelColor(i, color);
   }
-  FastLED.show();
+  tira.show();
 }
 
 void apagarAnillo(int anillo) {
-  encenderAnillo(anillo, CRGB::Black);
+  encenderAnillo(anillo, tira.Color(0, 0, 0));
 }
 
 void apagarTodos() {
-  for (int a = 0; a < NUM_ANILLOS; a++) {
-    apagarAnillo(a);
+  tira.clear();
+  tira.show();
+}
+
+void celebracionFinal() {
+  // Enciende todos los anillos en secuencia
+  for (int i = 0; i < NUM_ANILLOS; i++) {
+    encenderAnillo(i, colores[i]);
+    delay(150);
   }
+  delay(2000);
+  // Parpadea 3 veces
+  for (int v = 0; v < 3; v++) {
+    tira.clear();
+    tira.show();
+    delay(300);
+    for (int i = 0; i < NUM_ANILLOS; i++) {
+      encenderAnillo(i, colores[i]);
+    }
+    delay(300);
+  }
+  delay(1000);
+  apagarTodos();
 }
 
 // ── Reproducir audios en secuencia ───────────────
@@ -116,17 +129,13 @@ void reproducirSiguienteAudio() {
 
     if (p.numCuadrados == 0) {
       Serial.println("Fin del cuento!");
-      for (int i = 0; i < NUM_ANILLOS; i++) {
-        encenderAnillo(i, colores[i]);
-        delay(150);
-      }
-      delay(3000);
-      apagarTodos();
+      celebracionFinal();
       cuentoIniciado = false;
-      Serial.println("Click corto para jugar de nuevo");
+      Serial.println("Presiona boton 1 para jugar de nuevo");
       return;
     }
 
+    // Encender cuadrados del paso
     Serial.print("Encendiendo cuadrados: ");
     for (int c = 0; c < p.numCuadrados; c++) {
       int idx = p.cuadrados[c];
@@ -137,6 +146,7 @@ void reproducirSiguienteAudio() {
     Serial.println();
     Serial.print("Correcto: cuadrado ");
     Serial.println(p.correcto + 1);
+
     esperandoBoton = true;
   }
 }
@@ -155,72 +165,72 @@ void siguientePaso() {
   reproducirSiguienteAudio();
 }
 
-// ── Reiniciar juego ───────────────────────────────
-void reiniciarJuego() {
-  Serial.println("Reiniciando...");
-  apagarTodos();
-  reproductor.stop();
-  pasoActual     = 0;
-  audioActual    = 0;
-  reproduciendo  = false;
-  pausado        = false;
-  esperandoBoton = false;
-  cuentoIniciado = false;
-  Serial.println("Click corto para iniciar");
+// ── Verificar fin de audio ────────────────────────
+void verificarAudio() {
+  if (!reproduciendo) return;
+
+  if (reproductor.available()) {
+    if (reproductor.readType() == DFPlayerPlayFinished) {
+      Serial.println("Audio terminado");
+      reproduciendo = false;
+      delay(300);
+      reproducirSiguienteAudio();
+    }
+  }
 }
 
-// ── Callbacks botón control ───────────────────────
-void clickCorto(void* indice) {
-  // Click corto → iniciar si no hay cuento, pausar/reanudar si hay
-  if (!cuentoIniciado) {
+// ── Callback botones ─────────────────────────────
+void alPresionar(void* indice) {
+  int i = (int)(intptr_t)indice;
+
+  // Botón 1 (i=0) → iniciar o reiniciar
+  if (i == 0) {
     Serial.println("Iniciando cuento!");
+    apagarTodos();
+    reproductor.stop();
+    delay(300);
     cuentoIniciado = true;
-    pausado        = false;
     pasoActual     = 0;
     audioActual    = 0;
     reproduciendo  = false;
     esperandoBoton = false;
     reproducirSiguienteAudio();
-  } else {
-    if (!pausado) {
+    return;
+  }
+
+  // Botón 2 (i=1) → pausar / reanudar
+  if (i == 1) {
+    if (!cuentoIniciado) return;
+    if (reproduciendo) {
       reproductor.pause();
-      pausado = true;
+      reproduciendo = false;
       Serial.println("Pausado");
     } else {
       reproductor.start();
-      pausado       = false;
       reproduciendo = true;
       Serial.println("Reanudado");
     }
+    return;
   }
-}
 
-void clickLargo() {
-  // Click largo → reiniciar siempre
-  reiniciarJuego();
-}
-
-// ── Callback cuadrados ────────────────────────────
-void alPresionar(void* indice) {
-  int i = (int)(intptr_t)indice;
-
+  // Botones 3–11 (i=2..10) → cuadrados 1–9
   if (!cuentoIniciado) return;
-  if (pausado)         return;
   if (!esperandoBoton) return;
 
-  // i=1..9 → cuadrado índice 0..8
-  int cuadrado = i - 1;
+  int cuadrado = i - 2; // i=2 → cuadrado 0, i=3 → cuadrado 1...
 
   Paso& p = secuencia[pasoActual];
 
   if (cuadrado == p.correcto) {
+    // ✅ Correcto
     Serial.print("Correcto! Cuadrado ");
     Serial.println(cuadrado + 1);
     apagarTodos();
-    delay(500);
     esperandoBoton = false;
+    delay(500);
     siguientePaso();
   } else {
+    // Verificar si es cuadrado del paso
     bool esCuadradoDelPaso = false;
     for (int c = 0; c < p.numCuadrados; c++) {
       if (p.cuadrados[c] == cuadrado) {
@@ -229,9 +239,10 @@ void alPresionar(void* indice) {
       }
     }
     if (esCuadradoDelPaso) {
+      // ❌ Incorrecto — parpadea rojo y vuelve a su color
       Serial.print("Incorrecto! Era cuadrado ");
       Serial.println(p.correcto + 1);
-      encenderAnillo(cuadrado, CRGB::Red);
+      encenderAnillo(cuadrado, tira.Color(255, 0, 0));
       delay(500);
       encenderAnillo(cuadrado, colores[cuadrado]);
     }
@@ -241,25 +252,28 @@ void alPresionar(void* indice) {
 // ── Setup ────────────────────────────────────────
 void setup() {
   Serial.begin(115200);
-  delay(2000);
-  Serial.println("Iniciando sistema...");
+  delay(1000);
 
-  // LEDs
-  FastLED.addLeds<WS2812B, 4,  GRB>(leds[0], LEDS_POR_ANILLO); // cuadrado 1
-  FastLED.addLeds<WS2812B, 5,  GRB>(leds[1], LEDS_POR_ANILLO); // cuadrado 2
-  FastLED.addLeds<WS2812B, 15, GRB>(leds[2], LEDS_POR_ANILLO); // cuadrado 3
-  FastLED.addLeds<WS2812B, 23, GRB>(leds[3], LEDS_POR_ANILLO); // cuadrado 4
-  FastLED.addLeds<WS2812B, 12, GRB>(leds[4], LEDS_POR_ANILLO); // cuadrado 5
-  FastLED.addLeds<WS2812B, 19, GRB>(leds[5], LEDS_POR_ANILLO); // cuadrado 6
-  FastLED.addLeds<WS2812B, 18, GRB>(leds[6], LEDS_POR_ANILLO); // cuadrado 7
-  FastLED.addLeds<WS2812B, 22, GRB>(leds[7], LEDS_POR_ANILLO); // cuadrado 8
-  FastLED.addLeds<WS2812B, 3,  GRB>(leds[8], LEDS_POR_ANILLO); // cuadrado 9
+  // Iniciar LEDs
+  tira.begin();
+  tira.setBrightness(50); // bajo para pruebas con ESP32
+  tira.clear();
+  tira.show();
 
-  FastLED.setBrightness(80);
-  apagarTodos();
+  // Definir colores
+  colores[0] = tira.Color(255, 0,   0);    // cuadrado 1 — rojo
+  colores[1] = tira.Color(0,   0,   255);  // cuadrado 2 — azul
+  colores[2] = tira.Color(0,   255, 0);    // cuadrado 3 — verde
+  colores[3] = tira.Color(255, 255, 0);    // cuadrado 4 — amarillo
+  colores[4] = tira.Color(128, 0,   128);  // cuadrado 5 — morado
+  colores[5] = tira.Color(255, 165, 0);    // cuadrado 6 — naranjo
+  colores[6] = tira.Color(0,   255, 255);  // cuadrado 7 — cyan
+  colores[7] = tira.Color(255, 215, 0);    // cuadrado 8 — dorado
+  colores[8] = tira.Color(255, 255, 255);  // cuadrado 9 — blanco
+
   Serial.println("LEDs OK!");
 
-  // DFPlayer
+  // Iniciar DFPlayer
   serial_mp3.begin(9600, SERIAL_8N1, 16, 17);
   delay(1000);
 
@@ -272,19 +286,13 @@ void setup() {
   reproductor.volume(20);
   Serial.println("DFPlayer OK!");
 
-  // Botón control (índice 0) — click corto y largo
-  botones[0].attachClick(clickCorto, nullptr);
-  botones[0].attachLongPressStart(clickLargo);
-  botones[0].setPressTicks(2000); // 2 segundos para click largo
-
-  // Botones cuadrados (índices 1–9)
-  for (int i = 1; i < NUM_BOTONES; i++) {
+  // Callbacks botones
+  for (int i = 0; i < NUM_BOTONES; i++) {
     botones[i].attachClick(alPresionar, (void*)(intptr_t)i);
   }
 
   Serial.println("Sistema listo!");
-  Serial.println("Click corto en boton INICIO para comenzar");
-  Serial.println("Click largo  en boton INICIO para reiniciar");
+  Serial.println("Presiona boton 1 para iniciar el cuento");
 }
 
 // ── Loop ─────────────────────────────────────────
@@ -293,18 +301,4 @@ void loop() {
     botones[i].tick();
   }
   verificarAudio();
-}
-
-// ── Verificar fin de audio ────────────────────────
-void verificarAudio() {
-  if (!reproduciendo || pausado) return;
-
-  if (reproductor.available()) {
-    if (reproductor.readType() == DFPlayerPlayFinished) {
-      Serial.println("Audio terminado");
-      reproduciendo = false;
-      delay(300);
-      reproducirSiguienteAudio();
-    }
-  }
 }
